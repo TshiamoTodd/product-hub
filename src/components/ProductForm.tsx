@@ -200,7 +200,7 @@ export default function ProductForm({ onSubmit, isSubmitting, uploadProgress }: 
               />
               {previews.length > 0 && (
                 <div className="space-y-2">
-                    <p className="text-sm font-medium">Image Previews <Badge variant="secondary">{previews.length} / {MAX_IMAGES}</Badge></p>
+                    <div className="text-sm font-medium">Image Previews <Badge variant="secondary">{previews.length} / {MAX_IMAGES}</Badge></div>
                     <div className="grid grid-cols-3 gap-4">
                     {previews.map((src, index) => (
                         <div key={index} className="relative group">
