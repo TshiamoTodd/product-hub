@@ -54,14 +54,26 @@ export default function ProductForm({ onSubmit, isSubmitting, uploadProgress }: 
   const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (files) {
-      const newPreviews = Array.from(files).map(file => URL.createObjectURL(file));
-      setPreviews(newPreviews);
-      form.setValue('images', files, { shouldValidate: true });
+      const currentPreviews = previews.length;
+      const filesToAdd = Array.from(files).slice(0, MAX_IMAGES - currentPreviews);
+      
+      const newPreviews = filesToAdd.map(file => URL.createObjectURL(file));
+      setPreviews(prev => [...prev, ...newPreviews]);
+
+      const dataTransfer = new DataTransfer();
+      const existingFiles = form.getValues('images');
+      if (existingFiles) {
+        Array.from(existingFiles).forEach(file => dataTransfer.items.add(file));
+      }
+      filesToAdd.forEach(file => dataTransfer.items.add(file));
+
+      form.setValue('images', dataTransfer.files, { shouldValidate: true });
     }
   };
 
   const removePreview = (index: number) => {
     const newPreviews = [...previews];
+    URL.revokeObjectURL(newPreviews[index]); // Clean up object URL
     newPreviews.splice(index, 1);
     setPreviews(newPreviews);
 
@@ -77,10 +89,21 @@ export default function ProductForm({ onSubmit, isSubmitting, uploadProgress }: 
   
   const internalSubmit: SubmitHandler<z.infer<typeof productFormSchema>> = (data) => {
     onSubmit(data);
+    if (!form.formState.isSubmitting) {
+        // Wait for next tick to reset form, allows isSubmitting to propagate
+        setTimeout(() => {
+            if (!form.formState.isSubmitSuccessful) return;
+            form.reset();
+            setPreviews([]);
+            // Clean up any remaining object URLs
+            previews.forEach(p => URL.revokeObjectURL(p));
+        }, 0);
+    }
   };
 
   const handleFormReset = () => {
     form.reset();
+    previews.forEach(p => URL.revokeObjectURL(p)); // Clean up object URLs
     setPreviews([]);
   }
 
@@ -190,7 +213,7 @@ export default function ProductForm({ onSubmit, isSubmitting, uploadProgress }: 
                             <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Click to upload</span> or drag and drop</p>
                             <p className="text-xs text-muted-foreground">SVG, PNG, JPG or GIF (MAX. 5MB each)</p>
                           </div>
-                          <Input id="dropzone-file" type="file" className="hidden" multiple onChange={handleImageChange} accept="image/*" />
+                          <Input id="dropzone-file" type="file" className="hidden" multiple onChange={handleImageChange} accept="image/*" disabled={previews.length >= MAX_IMAGES}/>
                         </label>
                       </div>
                     </FormControl>
