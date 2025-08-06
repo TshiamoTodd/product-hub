@@ -36,7 +36,7 @@ type ProductTableProps = {
 
 const formatCurrency = (amount: number | null | undefined) => {
   if (amount === null || typeof amount === 'undefined') return '';
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(amount);
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'ZAR' }).format(amount);
 }
 
 export default function ProductTable({ products, onDelete, isLoading }: ProductTableProps) {

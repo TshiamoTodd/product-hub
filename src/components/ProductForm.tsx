@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import { useForm, type SubmitHandler } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import * as z from 'zod';
@@ -14,6 +14,7 @@ import { Textarea } from '@/components/ui/textarea';
 import { Progress } from '@/components/ui/progress';
 import { type ProductFormValues } from '@/lib/types';
 import { Badge } from './ui/badge';
+import { UploadDropzone } from '@/lib/uploadthing';
 
 const MAX_IMAGES = 3;
 const MAX_FILE_SIZE = 5 * 1024 * 1024; // 5MB
@@ -25,19 +26,20 @@ const productFormSchema = z.object({
   regularPrice: z.coerce.number({ invalid_type_error: "Price must be a number."}).positive("Price must be positive."),
   salePrice: z.coerce.number().optional().nullable(),
   tags: z.string().optional(),
-  images: z.custom<FileList>().refine(files => files && files.length > 0, 'At least one image is required.')
-    .refine(files => files && files.length <= MAX_IMAGES, `You can upload a maximum of ${MAX_IMAGES} images.`)
-    .refine(files => Array.from(files).every(file => file.size <= MAX_FILE_SIZE), `Each file size should be less than 5MB.`)
+  images: z.array(z.string().url("Invalid image URL"))
+    .min(1, 'At least one image is required.')
+    .max(MAX_IMAGES, `You can upload a maximum of ${MAX_IMAGES} images.`)
 });
 
 type ProductFormProps = {
-  onSubmit: SubmitHandler<ProductFormValues>;
+  onSubmit: (data: ProductFormValues) => Promise<void>;
   isSubmitting: boolean;
   uploadProgress: number;
 };
 
 export default function ProductForm({ onSubmit, isSubmitting, uploadProgress }: ProductFormProps) {
-  const [previews, setPreviews] = useState<string[]>([]);
+  const [imageUrls, setImageUrls] = useState<string[]>([]);
+  const [isClient, setIsClient] = useState(false);
   
   const form = useForm<z.infer<typeof productFormSchema>>({
     resolver: zodResolver(productFormSchema),
@@ -48,63 +50,45 @@ export default function ProductForm({ onSubmit, isSubmitting, uploadProgress }: 
       regularPrice: 0,
       salePrice: null,
       tags: '',
+      images: [], // Now an array of URLs
     },
   });
 
-  const handleImageChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const files = e.target.files;
-    if (files) {
-      const currentPreviews = previews.length;
-      const filesToAdd = Array.from(files).slice(0, MAX_IMAGES - currentPreviews);
-      
-      const newPreviews = filesToAdd.map(file => URL.createObjectURL(file));
-      setPreviews(prev => [...prev, ...newPreviews]);
+  // Initialize client state
+  useEffect(() => {
+    setIsClient(true);
+  }, []);
 
-      const dataTransfer = new DataTransfer();
-      const existingFiles = form.getValues('images');
-      if (existingFiles) {
-        Array.from(existingFiles).forEach(file => dataTransfer.items.add(file));
-      }
-      filesToAdd.forEach(file => dataTransfer.items.add(file));
+  // Sync form images with local state
+  useEffect(() => {
+    form.setValue('images', imageUrls, { shouldValidate: true });
+  }, [imageUrls, form]);
 
-      form.setValue('images', dataTransfer.files, { shouldValidate: true });
-    }
-  };
-
-  const removePreview = (index: number) => {
-    const newPreviews = [...previews];
-    URL.revokeObjectURL(newPreviews[index]); // Clean up object URL
-    newPreviews.splice(index, 1);
-    setPreviews(newPreviews);
-
-    const currentFiles = form.getValues('images');
-    if(currentFiles) {
-      const newFiles = new DataTransfer();
-      Array.from(currentFiles).forEach((file, i) => {
-        if(i !== index) newFiles.items.add(file);
-      });
-      form.setValue('images', newFiles.files, { shouldValidate: true });
-    }
+  const removeImage = (index: number) => {
+    const newImageUrls = imageUrls.filter((_, i) => i !== index);
+    setImageUrls(newImageUrls);
   };
   
-  const internalSubmit: SubmitHandler<z.infer<typeof productFormSchema>> = (data) => {
-    onSubmit(data);
-    if (!form.formState.isSubmitting) {
-        // Wait for next tick to reset form, allows isSubmitting to propagate
-        setTimeout(() => {
-            if (!form.formState.isSubmitSuccessful) return;
-            form.reset();
-            setPreviews([]);
-            // Clean up any remaining object URLs
-            previews.forEach(p => URL.revokeObjectURL(p));
-        }, 0);
+  const internalSubmit: SubmitHandler<z.infer<typeof productFormSchema>> = async (data) => {
+    console.log("Form data being submitted:", data);
+    console.log("Images:", data.images);
+    console.log("Images count:", data.images?.length);
+    
+    try {
+      await onSubmit(data);
+      
+      // Only reset if submission was successful
+      form.reset();
+      setImageUrls([]);
+    } catch (error) {
+      console.error("Form submission error:", error);
+      // Don't reset form on error
     }
   };
 
   const handleFormReset = () => {
     form.reset();
-    previews.forEach(p => URL.revokeObjectURL(p)); // Clean up object URLs
-    setPreviews([]);
+    setImageUrls([]);
   }
 
   return (
@@ -114,7 +98,9 @@ export default function ProductForm({ onSubmit, isSubmitting, uploadProgress }: 
         <CardDescription>Fill in the details below to add a new product to your catalog.</CardDescription>
       </CardHeader>
       <Form {...form}>
-        <form onSubmit={form.handleSubmit(internalSubmit)} onReset={handleFormReset} className="space-y-8">
+        <form onSubmit={form.handleSubmit(internalSubmit, (errors) => {
+          console.log("Form validation errors:", errors);
+        })} onReset={handleFormReset} className="space-y-8">
           <CardContent className="grid grid-cols-1 md:grid-cols-2 gap-8">
             <div className="space-y-6">
               <FormField
@@ -206,29 +192,62 @@ export default function ProductForm({ onSubmit, isSubmitting, uploadProgress }: 
                   <FormItem>
                     <FormLabel>Product Images</FormLabel>
                     <FormControl>
-                      <div className="flex flex-col items-center justify-center w-full">
-                        <label htmlFor="dropzone-file" className="flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg cursor-pointer bg-card hover:bg-secondary transition-colors">
-                          <div className="flex flex-col items-center justify-center pt-5 pb-6">
-                            <UploadCloud className="w-8 h-8 mb-4 text-muted-foreground" />
-                            <p className="mb-2 text-sm text-muted-foreground"><span className="font-semibold">Click to upload</span> or drag and drop</p>
-                            <p className="text-xs text-muted-foreground">SVG, PNG, JPG or GIF (MAX. 5MB each)</p>
+                      <div className="space-y-4">
+                        {imageUrls.length < MAX_IMAGES && (
+                          <UploadDropzone
+                            endpoint="productImageUploader"
+                            onClientUploadComplete={(res) => {
+                              console.log("Upload complete:", res);
+                              console.log("First file object:", res[0]);
+                              console.log("Available properties:", Object.keys(res[0] || {}));
+                              // Try different possible properties for the URL
+                              const newUrls = res.map(file => {
+                                // For UploadThing v7+, construct URL from key if url is not available
+                                let url = file.url;
+                                if (!url && file.key) {
+                                  url = `https://utfs.io/f/${file.key}`;
+                                }
+                                console.log("Extracted URL:", url);
+                                return url;
+                              }).filter(Boolean); // Remove any undefined values
+                              console.log("New URLs extracted:", newUrls);
+                              setImageUrls(prev => {
+                                const updated = [...prev, ...newUrls];
+                                console.log("Updated imageUrls state:", updated);
+                                return updated;
+                              });
+                            }}
+                            onUploadError={(error: Error) => {
+                              console.error("Upload error:", error);
+                            }}
+                            appearance={{
+                              container: "flex flex-col items-center justify-center w-full h-64 border-2 border-dashed rounded-lg cursor-pointer bg-card hover:bg-secondary transition-colors",
+                              uploadIcon: "text-muted-foreground w-8 h-8 mb-4",
+                              label: "text-sm text-muted-foreground",
+                              allowedContent: "text-xs text-muted-foreground",
+                            }}
+                          />
+                        )}
+                        
+                        {imageUrls.length >= MAX_IMAGES && (
+                          <div className="flex flex-col items-center justify-center w-full h-32 border-2 border-dashed rounded-lg bg-muted">
+                            <p className="text-sm text-muted-foreground">Maximum {MAX_IMAGES} images reached</p>
                           </div>
-                          <Input id="dropzone-file" type="file" className="hidden" multiple onChange={handleImageChange} accept="image/*" disabled={previews.length >= MAX_IMAGES}/>
-                        </label>
+                        )}
                       </div>
                     </FormControl>
                     <FormMessage />
                   </FormItem>
                 )}
               />
-              {previews.length > 0 && (
+              {imageUrls.length > 0 && (
                 <div className="space-y-2">
-                    <div className="text-sm font-medium">Image Previews <Badge variant="secondary">{previews.length} / {MAX_IMAGES}</Badge></div>
+                    <div className="text-sm font-medium">Image Previews <Badge variant="secondary">{imageUrls.length} / {MAX_IMAGES}</Badge></div>
                     <div className="grid grid-cols-3 gap-4">
-                    {previews.map((src, index) => (
+                    {imageUrls.map((url, index) => (
                         <div key={index} className="relative group">
-                        <Image src={src} alt={`Preview ${index + 1}`} width={100} height={100} className="rounded-md object-cover w-full aspect-square" />
-                        <button type="button" onClick={() => removePreview(index)} className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-1 opacity-75 group-hover:opacity-100 transition-opacity">
+                        <Image src={url} alt={`Preview ${index + 1}`} width={100} height={100} className="rounded-md object-cover w-full aspect-square" />
+                        <button type="button" onClick={() => removeImage(index)} className="absolute top-1 right-1 bg-destructive text-destructive-foreground rounded-full p-1 opacity-75 group-hover:opacity-100 transition-opacity">
                             <X className="w-3 h-3" />
                         </button>
                         </div>
@@ -248,7 +267,7 @@ export default function ProductForm({ onSubmit, isSubmitting, uploadProgress }: 
             <Button type="reset" variant="outline" disabled={isSubmitting}>
               Reset Form
             </Button>
-            <Button type="submit" disabled={isSubmitting}>
+            <Button type="submit" disabled={isSubmitting || !isClient}>
               {isSubmitting ? <><Loader2 className="mr-2 h-4 w-4 animate-spin" /> Adding Product...</> : 'Add Product'}
             </Button>
           </CardFooter>

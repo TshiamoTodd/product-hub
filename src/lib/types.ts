@@ -17,7 +17,7 @@ export type ProductWithId = Product & {
   id: string;
 };
 
-// Type for form values, including FileList for images
+// Type for form values, now using URL strings for images
 export type ProductFormValues = {
     name: string;
     shortDescription: string;
@@ -25,5 +25,5 @@ export type ProductFormValues = {
     regularPrice: number;
     salePrice?: number | null;
     tags?: string;
-    images: FileList;
+    images: string[]; // Changed from FileList to string[]
 }

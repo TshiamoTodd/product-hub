@@ -1,9 +1,8 @@
 "use client";
 
 import { useState, useEffect, useCallback } from 'react';
-import { db, storage } from '@/lib/firebase/config';
+import { db } from '@/lib/firebase/config';
 import { collection, addDoc, onSnapshot, deleteDoc, doc, query, orderBy } from 'firebase/firestore';
-import { ref, uploadBytesResumable, getDownloadURL, deleteObject } from 'firebase/storage';
 import { useToast } from '@/hooks/use-toast';
 import { type ProductWithId, type ProductFormValues } from '@/lib/types';
 import ProductForm from './ProductForm';
@@ -40,40 +39,18 @@ export default function ProductManager() {
   }, [toast]);
   
   const handleAddProduct = async (data: ProductFormValues) => {
+    console.log("ProductManager received data:", data);
+    console.log("Images received:", data.images);
+    console.log("Images count:", data.images?.length);
+    
     setIsSubmitting(true);
-    setUploadProgress(0);
-
-    const imageUrls: string[] = [];
-    const imageFiles = Array.from(data.images);
-    const totalFiles = imageFiles.length;
-    let filesUploaded = 0;
+    setUploadProgress(20);
 
     try {
-      for (const file of imageFiles) {
-        const productId = doc(collection(db, 'products')).id;
-        const storageRef = ref(storage, `products/${productId}/${file.name}`);
-        const uploadTask = uploadBytesResumable(storageRef, file);
-
-        await new Promise<void>((resolve, reject) => {
-          uploadTask.on('state_changed',
-            (snapshot) => {
-              const progress = (snapshot.bytesTransferred / snapshot.totalBytes) * 100;
-              const overallProgress = ((filesUploaded + (progress / 100)) / totalFiles) * 100;
-              setUploadProgress(overallProgress);
-            },
-            (error) => {
-              console.error("Upload failed", error);
-              reject(error);
-            },
-            async () => {
-              const downloadURL = await getDownloadURL(uploadTask.snapshot.ref);
-              imageUrls.push(downloadURL);
-              filesUploaded++;
-              resolve();
-            }
-          );
-        });
-      }
+      // Images are already URLs from UploadThing, no need to upload them
+      const imageUrls = data.images;
+      
+      setUploadProgress(80);
 
       await addDoc(collection(db, 'products'), {
         name: data.name,
@@ -85,6 +62,8 @@ export default function ProductManager() {
         imageUrls: imageUrls,
         createdAt: new Date(),
       });
+
+      setUploadProgress(100);
 
       toast({
         title: "Success!",
@@ -106,18 +85,8 @@ export default function ProductManager() {
   
   const handleDeleteProduct = useCallback(async (productId: string, imageUrls: string[]) => {
     try {
-      // Delete images from Storage
-      for (const url of imageUrls) {
-        const imageRef = ref(storage, url);
-        await deleteObject(imageRef).catch((error) => {
-          // It's okay if file doesn't exist, maybe it was already deleted.
-          if (error.code !== 'storage/object-not-found') {
-            throw error;
-          }
-        });
-      }
-
-      // Delete document from Firestore
+      // Note: UploadThing images are handled automatically by UploadThing
+      // We only need to delete the Firestore document
       await deleteDoc(doc(db, 'products', productId));
       
       toast({

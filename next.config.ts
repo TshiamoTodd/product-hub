@@ -10,18 +10,9 @@ const nextConfig: NextConfig = {
   },
   images: {
     remotePatterns: [
-      {
-        protocol: 'https',
-        hostname: 'placehold.co',
-        port: '',
-        pathname: '/**',
-      },
-      {
-        protocol: 'https',
-        hostname: 'firebasestorage.googleapis.com',
-        port: '',
-        pathname: '/**',
-      }
+      new URL('https://placehold.co/**'),
+      new URL('https://firebasestorage.googleapis.com/**'),
+      new URL('https://utfs.io/**'),
     ],
   },
 };
